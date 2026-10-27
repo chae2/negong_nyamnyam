@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gRPC 코드 실행 추적</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f3f6fb;color:#182338;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1180px;margin:auto;padding:22px 16px 34px}header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px}
+h1{font-size:clamp(21px,3vw,29px);margin:0;letter-spacing:-.04em}.sub{font-size:12px;color:#64748b;margin-top:4px}
+button{border:0;border-radius:10px;background:#2563eb;color:white;font-weight:750;padding:10px 14px;cursor:pointer;font-size:13px}button.secondary{background:#e5eaf2;color:#243249}
+.board{border:1px solid #dce4ef;background:white;border-radius:17px;padding:14px;box-shadow:0 8px 24px #17203308}
+.top{display:grid;grid-template-columns:minmax(0,1fr) 170px minmax(0,1fr);gap:12px;align-items:stretch}
+.pane{border:1px solid #dce4ef;border-radius:13px;overflow:hidden;min-width:0}.pane.shop{border-color:#b9d1ff}.pane.pay{border-color:#d5c7ff}
+.paneHead{display:flex;align-items:center;gap:8px;padding:11px 13px;font-weight:800;font-size:14px}.shop .paneHead{background:#eff6ff}.pay .paneHead{background:#f5f3ff}
+.paneHead span{font-size:20px}.paneStatus{margin-left:auto;font-size:11px;font-weight:750;color:#2563eb}
+.code{padding:8px;background:#111a29;color:#dce8f8;min-height:306px;font:12px/1.8 ui-monospace,SFMono-Regular,Consolas,monospace;overflow:auto}
+.codeLine{display:block;white-space:pre;padding:1px 6px;border-radius:4px;min-height:22px}.codeLine.active{background:#29466d;outline:1px solid #4778b7}.codeLine.executed{color:#a8b8cc}.kw{color:#93c5fd}.str{color:#86efac}.fn{color:#fde68a}.comment{color:#8291a8}.val{color:#f9a8d4}
+.middle{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:5px}
+.protocol{border:1px solid #dce4ef;background:#f8fafc;border-radius:10px;padding:8px 5px;text-align:center;width:100%;font-size:11px;color:#475569}
+.protocol b{display:block;color:#26364f;font-size:12px;margin-bottom:3px}
+.wire{height:48px;width:100%;position:relative;display:flex;align-items:center}
+.wire:before{content:"";position:absolute;left:0;right:0;height:3px;background:#d7deea;border-radius:3px}
+.arrow{position:absolute;width:13px;height:13px;border-radius:4px;background:#2563eb;top:17px;left:0;opacity:0;z-index:2}
+.arrow.forward{opacity:1;animation:forward 1s ease-in-out forwards}
+.arrow.backward{opacity:1;animation:backward 1s ease-in-out forwards;background:#16a34a}
+@keyframes forward{from{left:0}to{left:calc(100% - 13px)}}
+@keyframes backward{from{left:calc(100% - 13px)}to{left:0}}
+.direction{font-size:11px;font-weight:750;color:#64748b;text-align:center;min-height:28px}
+.payload{width:100%;background:#101827;color:#dbeafe;border-radius:9px;padding:9px 7px;font:10px/1.6 ui-monospace,monospace;overflow-wrap:anywhere;min-height:80px}
+.payload strong{color:#86efac;display:block;font:750 11px/1.4 Inter,sans-serif;margin-bottom:4px}
+.stageTitle{display:flex;justify-content:space-between;gap:10px;align-items:center;margin:13px 2px 9px}
+.stageTitle strong{font-size:14px}.stageTitle span{font-size:12px;color:#64748b}
+.timeline{display:flex;gap:5px;margin:12px 0 0}.step{flex:1;border:1px solid #dce4ef;border-radius:8px;background:#f8fafc;padding:8px 5px;text-align:center;font-size:10px;color:#64748b}.step b{display:block;font-size:11px;margin-bottom:3px}.step.active{border-color:#7ba8ff;background:#eff6ff;color:#1d4ed8}.step.done{border-color:#86efac;background:#f0fdf4;color:#15803d}
+.bottom{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:13px}.statusText{font-size:13px;font-weight:750;color:#334155}.controls{display:flex;gap:8px;flex-wrap:wrap}.foot{font-size:11px;color:#64748b;margin-top:9px}
+@media(max-width:760px){main{padding:14px 9px}.board{padding:9px}.top{grid-template-columns:minmax(0,1fr) 76px minmax(0,1fr);gap:5px}.paneHead{padding:8px 6px;font-size:11px;gap:4px;flex-wrap:wrap}.paneHead span{font-size:16px}.paneStatus{width:100%;margin:0}.code{font-size:10px;padding:5px;min-height:340px}.codeLine{padding:1px 3px}.middle{gap:6px}.protocol{font-size:9px;padding:6px 2px}.protocol b{font-size:10px}.payload{font-size:8px;padding:5px;min-height:85px}.direction{font-size:9px}.timeline{flex-wrap:wrap}.step{min-width:29%}.bottom{align-items:flex-start;flex-direction:column}}
+</style>
+</head>
+<body>
+<main>
+<header><div><h1>gRPC · 코드 실행 추적</h1><div class="sub">쇼핑몰 코드에서 결제 서버 코드로, 한 단계씩</div></div><button class="secondary" id="reset">↺ 처음부터</button></header>
+<section class="board">
+  <div class="top">
+    <section class="pane shop">
+      <div class="paneHead"><span>🛒</span> 쇼핑몰 서버 <div class="paneStatus" id="shopStatus">결제 요청 전</div></div>
+      <div class="code" id="shopCode">
+        <span class="codeLine" data-line="0"><span class="kw">PaymentRequest</span> req =</span>
+        <span class="codeLine" data-line="1">  PaymentRequest.newBuilder()</span>
+        <span class="codeLine" data-line="2">  .setOrderId(<span class="str">"ORDER-123"</span>)</span>
+        <span class="codeLine" data-line="3">  .setAmount(<span class="val">25000</span>)</span>
+        <span class="codeLine" data-line="4">  .build();</span>
+        <span class="codeLine" data-line="5"><span class="comment">// 결제 서버 호출</span></span>
+        <span class="codeLine" data-line="6"><span class="kw">PaymentResponse</span> res =</span>
+        <span class="codeLine" data-line="7">  <span class="fn">paymentStub</span>.createPayment(req);</span>
+        <span class="codeLine" data-line="8"><span class="comment">// 응답을 받은 뒤 실행</span></span>
+        <span class="codeLine" data-line="9"><span class="kw">if</span> (res.getSuccess()) {</span>
+        <span class="codeLine" data-line="10">  order.markPaid();</span>
+        <span class="codeLine" data-line="11">}</span>
+      </div>
+    </section>
+    <div class="middle">
+      <div class="protocol"><b id="protoTitle">호출 전</b><span id="protoSub">요청 준비</span></div>
+      <div class="wire"><div id="arrow" class="arrow"></div></div>
+      <div class="direction" id="direction">아직 전송 안 함</div>
+      <div class="payload" id="payload"><strong>📦 요청 데이터</strong>order_id: "ORDER-123"<br>amount: 25000</div>
+      <div class="protocol"><b>HTTP/2</b><span>전송 경로</span></div>
+    </div>
+    <section class="pane pay">
+      <div class="paneHead"><span>💳</span> 결제 서버 <div class="paneStatus" id="payStatus">요청 대기</div></div>
+      <div class="code" id="payCode">
+        <span class="codeLine" data-line="0"><span class="comment">// 서버는 요청 대기</span></span>
+        <span class="codeLine" data-line="1"><span class="kw">public</span> PaymentResponse</span>
+        <span class="codeLine" data-line="2"> createPayment(req) {</span>
+        <span class="codeLine" data-line="3">  <span class="comment">// 요청 검증</span></span>
+        <span class="codeLine" data-line="4">  validate(req);</span>
+        <span class="codeLine" data-line="5">  <span class="comment">// 결제 처리</span></span>
+        <span class="codeLine" data-line="6">  String tx = charge(</span>
+        <span class="codeLine" data-line="7">    req.getAmount());</span>
+        <span class="codeLine" data-line="8">  <span class="kw">return</span> PaymentResponse</span>
+        <span class="codeLine" data-line="9">    .newBuilder()</span>
+        <span class="codeLine" data-line="10">    .setSuccess(true)</span>
+        <span class="codeLine" data-line="11">    .setTransactionId(tx)</span>
+        <span class="codeLine" data-line="12">    .build();</span>
+        <span class="codeLine" data-line="13">}</span>
+      </div>
+    </section>
+  </div>
+  <div class="timeline" id="timeline">
+    <div class="step active"><b>1</b>요청 생성</div><div class="step"><b>2</b>Stub 호출</div><div class="step"><b>3</b>직렬화·전송</div><div class="step"><b>4</b>서버 실행</div><div class="step"><b>5</b>응답 직렬화</div><div class="step"><b>6</b>응답 수신</div><div class="step"><b>7</b>결제 완료</div>
+  </div>
+  <div class="bottom"><div class="statusText" id="caption">요청 데이터를 만들고 있어요.</div><div class="controls"><button id="prev" class="secondary">← 이전</button><button id="next">다음 단계 →</button></div></div>
+  <div class="foot">실제 결제는 수행하지 않는 시뮬레이션 · 코드 예시는 흐름을 보여주기 위한 축약형입니다.</div>
+</section>
+</main>
+<script>
+const states=[
+ {shop:[0,1,2,3,4],pay:[],ss:"요청 데이터 생성 중",ps:"요청 대기",cap:"① 쇼핑몰 서버: 결제 요청 객체 생성",pt:"객체",sub:"메모리 안의 데이터",dir:"아직 네트워크 전",arrow:"",payload:'<strong>🧱 Java 객체</strong>orderId = "ORDER-123"<br>amount = 25000'},
+ {shop:[5,6,7],pay:[],ss:"결제 호출 · 대기",ps:"요청 대기",cap:"② Stub 메서드 호출 — 여기서 원격 호출이 시작돼요",pt:"Stub",sub:"createPayment(req)",dir:"쇼핑몰 → gRPC",arrow:"",payload:'<strong>📨 호출 인자</strong>PaymentRequest req<br>함수 호출처럼 보이지만 원격 호출'},
+ {shop:[7],pay:[],ss:"요청 직렬화 중",ps:"요청 대기",cap:"③ gRPC가 요청 객체를 Protobuf 바이너리로 직렬화",pt:"Serialize",sub:"객체 → 바이트",dir:"요청 메시지 생성",arrow:"",payload:'<strong>📦 Protobuf bytes</strong>0A 0A ... 10 A8 C3 01<br>예시용 축약 바이트'},
+ {shop:[7],pay:[0],ss:"결제 pending 중",ps:"요청 수신 · 해석 중",cap:"④ 요청 바이트가 HTTP/2를 통해 결제 서버로 이동",pt:"HTTP/2",sub:"요청 스트림",dir:"SHOP  →  PAYMENT",arrow:"forward",payload:'<strong>➡ 요청 전송</strong>serialized request bytes<br>order_id + amount'},
+ {shop:[7],pay:[1,2,3,4],ss:"결제 pending 중",ps:"요청 검증 중",cap:"⑤ 결제 서버: 받은 바이트를 요청 객체로 복원한 뒤 메서드 실행",pt:"Deserialize",sub:"바이트 → 객체",dir:"서버 코드로 진입",arrow:"",payload:'<strong>📬 복원된 요청</strong>req.order_id = "ORDER-123"<br>req.amount = 25000'},
+ {shop:[7],pay:[5,6,7],ss:"결제 pending 중",ps:"결제 처리 중",cap:"⑥ 결제 서버의 실제 비즈니스 로직 실행",pt:"Server method",sub:"charge(25000)",dir:"결제 서버 내부 실행",arrow:"",payload:'<strong>💳 결제 처리</strong>charge(25000)<br>transactionId = "TX-789"'},
+ {shop:[7],pay:[8,9,10,11,12],ss:"결제 pending 중",ps:"응답 생성 중",cap:"⑦ 결제 서버가 PaymentResponse를 만들고 Protobuf로 직렬화",pt:"Serialize",sub:"응답 객체 → 바이트",dir:"응답 메시지 생성",arrow:"",payload:'<strong>📦 응답 바이트</strong>success = true<br>transaction_id = "TX-789"'},
+ {shop:[7],pay:[12,13],ss:"결제 pending 중",ps:"응답 전송 중",cap:"⑧ 응답 바이트가 결제 서버에서 쇼핑몰 서버로 돌아와요",pt:"HTTP/2",sub:"응답 스트림",dir:"PAYMENT  ←  SHOP",arrow:"backward",payload:'<strong>⬅ 응답 전송</strong>serialized response bytes<br>success + transaction_id'},
+ {shop:[8,9],pay:[13],ss:"응답 수신 · 확인 중",ps:"응답 반환 완료",cap:"⑨ 쇼핑몰 클라이언트가 응답을 역직렬화해 res 객체로 받음",pt:"Deserialize",sub:"바이트 → 객체",dir:"응답 객체 복원",arrow:"",payload:'<strong>📬 PaymentResponse</strong>success = true<br>transactionId = "TX-789"'},
+ {shop:[9,10,11],pay:[13],ss:"결제 완료 ✓",ps:"처리 완료 ✓",cap:"⑩ 응답 확인 후 쇼핑몰 주문 상태를 결제 완료로 변경",pt:"완료",sub:"order.markPaid()",dir:"호출 종료",arrow:"",payload:'<strong>✅ 최종 상태</strong>주문 ORDER-123<br>결제 완료 · TX-789'}
+];
+let i=0;
+const $=id=>document.getElementById(id);
+function highlight(id,lines){
+ document.querySelectorAll("#"+id+" .codeLine").forEach((el,n)=>{
+  const num=Number(el.dataset.line);el.classList.toggle("active",lines.includes(num));
+  el.classList.toggle("executed",num<Math.min(...(lines.length?lines:[999])));
+ });
+}
+function render(){
+ const s=states[i];highlight("shopCode",s.shop);highlight("payCode",s.pay);
+ $("shopStatus").textContent=s.ss;$("payStatus").textContent=s.ps;$("caption").textContent=s.cap;
+ $("protoTitle").textContent=s.pt;$("protoSub").textContent=s.sub;$("direction").textContent=s.dir;$("payload").innerHTML=s.payload;
+ $("arrow").className="arrow"+(s.arrow?" "+s.arrow:"");void $("arrow").offsetWidth;
+ document.querySelectorAll(".step").forEach((el,n)=>{el.classList.toggle("active",n===i);el.classList.toggle("done",n<i)});
+ $("prev").disabled=i===0;$("next").textContent=i===states.length-1?"처음부터 ↺":"다음 단계 →";
+}
+$("next").addEventListener("click",()=>{i=i===states.length-1?0:i+1;render()});
+$("prev").addEventListener("click",()=>{i=Math.max(0,i-1);render()});
+$("reset").addEventListener("click",()=>{i=0;render()});
+render();
+</script>
+</body>
+</html>
